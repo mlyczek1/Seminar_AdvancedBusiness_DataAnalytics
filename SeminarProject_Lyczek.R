@@ -15,7 +15,7 @@ library(viridis)
 library(knitr)
 library(kableExtra)
 
-
+#set working directory
 dfir<-paste("/Users/mialyczek/Downloads/Seminar")
 setwd(dfir)
 
@@ -241,32 +241,9 @@ ggplot() +
   labs(title = "Object Areas by Category", fill = "Category")
 
 
-
-# Convert to an sf object with a specific CRS (assuming a hypothetical projected CRS)
-pax1_sf <- st_as_sf(pax1, coords = c("x.m", "y.m"), crs = 32618)
-
-#merged_data_sf <-st_as_sf(merged_data, coords = c("x.m", "y.m"), crs = 32618)
-# Transform to geographic coordinates (WGS 84, EPSG 4326)
-pax1_geo <- st_transform(pax1_sf, crs = 4326)
-
-
-merged_data_geo <-st_transform(merged_data_sf, crs = 4326)
-#generate a plot with passenger data and the polygons
-plot_merged <- ggplot() +
-  geom_sf(data = hulls_sf, aes(fill = category), color = "black") +  # Plot sf object (polygons)
-  geom_point(data = pax1_geo, aes(color = factor(id)), size = 2) +  # Plot pedestrian points from data frame
-  scale_fill_manual(values = all_colors) +  # Adjust fill color scale if needed
-  scale_color_manual(values = all_colors) +  # Adjust point color scale if needed
-  labs(title = "Combined Plot of SF Object and Data Frame") +  # Add plot title
-  coord_sf(lims_method = "geometry_bbox")  # Adjust coordinate limits
-
-print(plot_merged)
-
-
-
 ########Aggregate the Data: Based on Frames ##########
 
-# Define the aggregation interval in seconds (X)
+# Define the aggregation interval in seconds
 aggregation_interval <- 8  # e.g., aggregate every 2 seconds
 
 # Assign time intervals based on frames
@@ -274,7 +251,7 @@ data <- data %>%
   mutate(time_interval = floor(frame / aggregation_interval))
 
 # Aggregate data
-# Here we take the mean of x and y coordinates for each pedestrian in each time interval
+# Here we take the mean of x,y, and h coordinates for each pedestrian in each time interval
 aggregated_df <- data %>%
   group_by(id, time_interval) %>%
   summarize(
@@ -309,7 +286,7 @@ pedestrian_speed <- lapply(unique(aggregated_df$id), function(ped_id) {
   calculate_speed(aggregated_df[aggregated_df$id == ped_id, ])
 })
 
-# Combine speed data for all pedestrians
+# Combine speed data for all pedestrians to main data frame
 aggregated_df <- do.call(rbind, pedestrian_speed)
 
 
@@ -346,10 +323,10 @@ min_df <- aggregated_df %>%
   select(-speed, -h.avg, -distance, -time_diff)
 
 
-# Determine the pedestrian locations
+# Determine pedestrian locations
 locations_df <- determine_pedestrian_location(min_df, hulls)
 
-# Merge the location results into speed_data
+# Merge the location results into main data frame
 aggregated_df <- aggregated_df %>%
   left_join(locations_df %>% select(id, time_interval, location), by = c("id", "time_interval"))
 
@@ -477,15 +454,14 @@ for (i in seq(1, length(unique_ids), by = chunk_size)) {
   results_list[[length(results_list) + 1]] <- chunk_result
 }
 
-# Combine all chunks back into a single data.table
+# Combine all chunks back into a single data frame
 aggregated_df <- rbindlist(results_list)
-
 aggregated_df <- as.data.frame(aggregated_df)
 
 
 ####### First and Last Frames ########
 
-# Define hull_names
+# Define hull names
 hull_names <- c("Treppe_Baustelle1,Treppe_Baustelle2, Säule_1, Säule_2, Säule_3, Säule_4,Fahrplan, Display, Muelleimer, Snack_Automat, Tuer")
 
 # Function to determine first_frame and last_frame
@@ -562,12 +538,12 @@ classify_trajectories_in_chunks <- function(df, chunk_size = 1000) {
     results[[length(results) + 1]] <- classified_chunk
   }
   
-  # Combine all chunks into a single data.table
+  # Combine all chunks into a single data frame
   result_df <- rbindlist(results)
   return(result_df)
 }
 
-# Applying the function to classify trajectories for sample_df in chunks
+# Applying the function to classify trajectories in chunks
 aggregated_df <- classify_trajectories_in_chunks(aggregated_df, chunk_size = 1000)
 
 # Save the final result to csv
@@ -578,7 +554,7 @@ write.csv(aggregated_df, "aggregated_df.csv", row.names=FALSE)
 ###### Data Analysis ##########
 aggregated_df <- read.csv("aggregated_df.csv", header = TRUE)
 
-####### encode location and trajectory columns######
+####### Encode location and trajectory columns######
 
 # Ensure 'location' and 'trajectory' are treated as factors
 aggregated_df <- aggregated_df %>%
@@ -589,12 +565,12 @@ aggregated_df <- aggregated_df %>%
 # One-hot encoding for 'location'
 location_encoded <- model.matrix(~ location - 1, data = aggregated_df) %>%
   as.data.frame() %>%
-  rename_all(~ gsub("location", "loc", .)) # Optional: renaming columns for clarity
+  rename_all(~ gsub("location", "loc", .)) 
 
 # One-hot encoding for 'location'
 trajectory_encoded <- model.matrix(~ trajectory - 1, data = aggregated_df) %>%
   as.data.frame() %>%
-  rename_all(~ gsub("trajectory", "traj", .)) # Optional: renaming columns for clarity
+  rename_all(~ gsub("trajectory", "traj", .))
 
 # Combine the encoded columns with the original data, dropping 'location' and 'trajectory'
 combined_df <- aggregated_df %>%
@@ -602,16 +578,16 @@ combined_df <- aggregated_df %>%
   bind_cols(location_encoded, trajectory_encoded)
 
 
-####### Clustering pedestrian movements: Speed & coordinates########
+####### Clustering Pedestrian Movements: Speed & Coordinates ########
 #apply K-means clustering to see if there are patterns to pedestrian movements
 
 # Select predictors for clustering
 data_for_clustering <- aggregated_df %>%
-  select(id, x.avg, y.avg, speed)
+  select(x.avg, y.avg, speed)
 
 # Standardize the data (excluding 'id' column)
 data_scaled <- data_for_clustering %>%
-  select(-id) %>%
+  #select(-id) %>%
   scale()
 
 # Determine the optimal number of clusters using the Elbow Method
@@ -674,7 +650,7 @@ ggplot(cluster_summary1, aes(x = Cluster1, y = count)) +
   labs(title = "Distribution of Pedestrians in Clusters")
 
 #Re-calculate WCSS
-# Step 1: Calculate centroids for each cluster and store in a new dataframe
+# Calculate centroids for each cluster and store in a new dataframe
 wss_df <- aggregated_df %>%
   group_by(Cluster1) %>%
   summarise(
@@ -683,17 +659,17 @@ wss_df <- aggregated_df %>%
     centroid_speed = mean(speed)
   )
 
-# Step 2: Merge centroids back with the original data
+# Merge centroids back with the original data
 merged_df <- aggregated_df %>%
   left_join(wss_df, by = "Cluster1")
 
-# Step 3: Calculate the squared Euclidean distance to the centroid
+# Calculate the squared Euclidean distance to the centroid
 merged_df <- merged_df %>%
   mutate(
     distance_to_centroid = (x.avg - centroid_x)^2 + (y.avg - centroid_y)^2 + (speed - centroid_speed)^2
   )
 
-# Step 4: Calculate the total within-cluster sum of squares (WSS)
+# Calculate the total within-cluster sum of squares (WSS)
 total_wss <- sum(merged_df$distance_to_centroid)
 
 # Calculate the number of clusters
@@ -704,33 +680,28 @@ average_wss1 <- total_wss / num_clusters
 
 # Print the average WSS
 average_wss1
+#[1] 6014481
 
-
-####### Clustering pedestrian movements: Time spent, trajectory & coordinates########
+####### Clustering pedestrian movements: Trajectory Encoded########
 #apply K-means clustering to see if there are patterns to pedestrian movements
 colnames(trajectory_encoded)
 
 # Select predictors for clustering
 data_for_clustering <- combined_df %>%
-  select(id, x.avg, y.avg, time_spent, trajDisplay,trajFahrplan, trajMuelleimer, "trajon platform moving towards Display" ,"trajon platform moving towards Fahrplan", "trajon platform moving towards Muelleimer", "trajon platform moving towards Säule_1", "trajon platform moving towards Säule_2","trajon platform moving towards Säule_3", "trajon platform moving towards Säule_4","trajon platform moving towards Snack_Automat", "trajon platform moving towards Treppe_Baustelle1","trajon platform moving towards Treppe_Baustelle2","trajon platform moving towards Tuer",trajplatform, trajSäule_1, trajSäule_2, trajSäule_3, trajSäule_4, trajSnack_Automat, trajTreppe_Baustelle1, trajTreppe_Baustelle2, trajTuer)
+  select(trajDisplay,trajFahrplan, trajMuelleimer, "trajon platform moving towards Display" ,"trajon platform moving towards Fahrplan", "trajon platform moving towards Muelleimer", "trajon platform moving towards Säule_1", "trajon platform moving towards Säule_2","trajon platform moving towards Säule_3", "trajon platform moving towards Säule_4","trajon platform moving towards Snack_Automat", "trajon platform moving towards Treppe_Baustelle1","trajon platform moving towards Treppe_Baustelle2","trajon platform moving towards Tuer",trajplatform, trajSäule_1, trajSäule_2, trajSäule_3, trajSäule_4, trajSnack_Automat, trajTreppe_Baustelle1, trajTreppe_Baustelle2, trajTuer)
 
-# Standardize the data (excluding 'id' column)
-data_scaled <- data_for_clustering %>%
-  select(-id) %>%
-  scale()
 
 # Determine the optimal number of clusters using the Elbow Method
-wss <- (nrow(data_scaled) - 1) * sum(apply(data_scaled, 2, var))
+wss <- (nrow(data_for_clustering) - 1) * sum(apply(data_for_clustering, 2, var))
 for (i in 2:25) {
-  wss[i] <- sum(kmeans(data_scaled, centers = i, iter.max = 2000, nstart = 25)$withinss)
+  wss[i] <- sum(kmeans(data_for_clustering, centers = i, iter.max = 1000, nstart = 25)$withinss)
 }
 
 # Plot the Elbow plot
-plot(1:25, wss, type = "b", xlab = "Number of Clusters", ylab = "Within groups sum of squares", main = "Elbow Method for Optimal Clusters Time spent, 
-Trajectories, & Coordinates")
+plot(1:25, wss, type = "b", xlab = "Number of Clusters", ylab = "Within groups sum of squares", main = "Elbow Method for Optimal Clusters: Trajectories")
 
 # Assuming we choose # clusters from the elbow plot
-kmeans_result <- kmeans(data_scaled, centers = 20, nstart = 25)
+kmeans_result <- kmeans(data_for_clustering, centers = 20, nstart = 25)
 
 # Add cluster results to the sampled data
 aggregated_df$Cluster2 <- kmeans_result$cluster
@@ -777,7 +748,7 @@ ggplot(cluster_summary2, aes(x = Cluster2, y = count)) +
   labs(title = "Distribution of Pedestrians in Clusters")
 
 #Re-calculate WCSS
-# Step 1: Calculate centroids for each cluster and store in a new dataframe
+# Calculate centroids for each cluster and store in a new dataframe
 merged_df2 <- combined_df
 merged_df2 <- merged_df2 %>%
   left_join(aggregated_df %>% select(id, time_interval, Cluster2), by = c("id", "time_interval"))
@@ -785,9 +756,6 @@ merged_df2 <- merged_df2 %>%
 wss_df2 <- merged_df2 %>%
   group_by(Cluster2) %>%
   summarise(
-    centroid_x = mean(x.avg),
-    centroid_y = mean(y.avg),
-    centroid_time_spent = mean(time_spent),
     centroid_trajDisplay = mean(trajDisplay),
     centroid_trajFahrplan = mean(trajFahrplan), 
     centroid_trajMuelleimer = mean(trajMuelleimer), 
@@ -813,14 +781,14 @@ wss_df2 <- merged_df2 %>%
     centroid_trajTuer = mean(trajTuer)
   )
 
-# Step 2: Merge centroids back with the original data
+# Merge centroids back with the original data
 merged_df2 <- merged_df2 %>%
   left_join(wss_df2, by = "Cluster2")
 
-# Step 3: Calculate the squared Euclidean distance to the centroid
+# Calculate the squared Euclidean distance to the centroid
 merged_df2 <- merged_df2 %>%
   mutate(
-    distance_to_centroid = (x.avg - centroid_x)^2 + (y.avg - centroid_y)^2 + (time_spent - centroid_time_spent)^2 +
+    distance_to_centroid = 
       (trajDisplay - centroid_trajDisplay)^2 + (trajFahrplan - centroid_trajFahrplan)^2 + 
       (trajMuelleimer - centroid_trajMuelleimer)^2 + (`trajon platform moving towards Display` - centroid_trajon_platform_moving_towards_Display)^2 +
       (`trajon platform moving towards Fahrplan` - centroid_trajon_platform_moving_towards_Fahrplan)^2 +
@@ -844,7 +812,7 @@ merged_df2 <- merged_df2 %>%
       (trajTuer - centroid_trajTuer)^2
   )
 
-# Step 4: Calculate the total within-cluster sum of squares (WSS)
+# Calculate the total within-cluster sum of squares (WSS)
 total_wss2 <- sum(merged_df2$distance_to_centroid)
 
 # Calculate the number of clusters
@@ -855,7 +823,7 @@ average_wss2 <- total_wss2 / num_clusters
 
 # Print the average WSS
 average_wss2
-
+#[1] 30280.97
 
 ####### Clustering with encoded location variables & time_spent########
 
@@ -874,21 +842,10 @@ combined_df1 <- aggregated_df %>%
 
 # Select predictors for clustering
 data_for_clustering <- combined_df1 %>%
-  select(id, time_spent, locationDisplay, locationFahrplan, locationMuelleimer,locationplatform, locationSäule_1, locationSäule_2,locationSäule_3, locationSäule_4, locationSnack_Automat, locationTreppe_Baustelle1,locationTreppe_Baustelle2, locationTuer )
+  select(time_spent, locationDisplay, locationFahrplan, locationMuelleimer,locationplatform, locationSäule_1, locationSäule_2,locationSäule_3, locationSäule_4, locationSnack_Automat, locationTreppe_Baustelle1,locationTreppe_Baustelle2, locationTuer )
 
-# Calculate the variance of each column
-variance_check <- apply(data_for_clustering %>% select(-id), 2, var)
-
-# Identify columns with zero variance
-zero_variance_columns <- names(variance_check[variance_check == 0])
-
-# Remove zero variance columns
-data_for_clustering_clean <- data_for_clustering %>%
-  select(-one_of(zero_variance_columns))
-
-# Standardize the data (excluding 'id' column)
-data_scaled <- data_for_clustering_clean %>%
-  select(-id) %>%
+# Standardize the data
+data_scaled <- data_for_clustering %>%
   scale()
 
 # Determine the optimal number of clusters using the Elbow Method
@@ -898,8 +855,7 @@ for (i in 2:30) {
 }
 
 # Plot the Elbow plot
-plot(1:30, wss, type = "b", xlab = "Number of Clusters", ylab = "Within groups sum of squares", main = "Elbow Method for Optimal Clusters
-     Time Spent & Location")
+plot(1:30, wss, type = "b", xlab = "Number of Clusters", ylab = "Within groups sum of squares", main = "Elbow Method for Optimal Clusters\nTime Spent & Location")
 
 # Assuming we choose # clusters from the elbow plot
 kmeans_result <- kmeans(data_scaled, centers = 23, nstart = 25)
@@ -946,7 +902,7 @@ ggplot(cluster_summary3, aes(x = Cluster3, y = count)) +
   labs(title = "Distribution of Pedestrians in Clusters")
 
 #Re-calculate WCSS
-# Step 1: Calculate centroids for each cluster and store in a new dataframe
+# Calculate centroids for each cluster and store in a new dataframe
 merged_df3 <- combined_df1
 merged_df3 <- merged_df3 %>%
   left_join(aggregated_df %>% select(id, time_interval, Cluster3), by = c("id", "time_interval"))
@@ -969,11 +925,11 @@ wss_df3 <- merged_df3 %>%
     centroid_locationTuer = mean(locationTuer)
   )
 
-# Step 2: Merge centroids back with the original data
+# Merge centroids back with the original data
 merged_df3 <- merged_df3 %>%
   left_join(wss_df3, by = "Cluster3")
 
-# Step 3: Calculate the squared Euclidean distance to the centroid
+# Calculate the squared Euclidean distance to the centroid
 merged_df3 <- merged_df3 %>%
   mutate(
     distance_to_centroid =(time_spent - centroid_time_spent)^2 +
@@ -991,7 +947,7 @@ merged_df3 <- merged_df3 %>%
       (locationTuer - centroid_locationTuer)^2
   )
 
-# Step 4: Calculate the total within-cluster sum of squares (WSS)
+# Calculate the total within-cluster sum of squares (WSS)
 total_wss3 <- sum(merged_df3$distance_to_centroid)
 
 # Calculate the number of clusters
@@ -1002,6 +958,7 @@ average_wss3 <- total_wss3 / num_clusters
 
 # Print the average WSS
 average_wss3
+#[1] 1924997224
 
 ####### Clustering with encoded location variables, time_spent, and speed ########
 
@@ -1012,12 +969,11 @@ combined_df1 <- aggregated_df %>%
 
 # Select predictors for clustering
 data_for_clustering <- combined_df1 %>%
-  select(id, time_spent, speed, locationDisplay, locationFahrplan, locationMuelleimer,locationplatform, locationSäule_1, locationSäule_2,locationSäule_3, locationSäule_4, locationSnack_Automat, locationTreppe_Baustelle1,locationTreppe_Baustelle2, locationTuer)
+  select(time_spent, speed, locationDisplay, locationFahrplan, locationMuelleimer,locationplatform, locationSäule_1, locationSäule_2,locationSäule_3, locationSäule_4, locationSnack_Automat, locationTreppe_Baustelle1,locationTreppe_Baustelle2, locationTuer)
 
 
-# Standardize the data (excluding 'id' column)
+# Standardize the data
 data_scaled <- data_for_clustering %>%
-  select(-id) %>%
   scale()
 
 # Determine the optimal number of clusters using the Elbow Method
@@ -1099,11 +1055,11 @@ wss_df4 <- merged_df4 %>%
     centroid_locationTuer = mean(locationTuer)
   )
 
-# Step 2: Merge centroids back with the original data
+# Merge centroids back with the original data
 merged_df4 <- merged_df4 %>%
   left_join(wss_df4, by = "Cluster4")
 
-# Step 3: Calculate the squared Euclidean distance to the centroid
+# Calculate the squared Euclidean distance to the centroid
 merged_df4 <- merged_df4 %>%
   mutate(
     distance_to_centroid =(time_spent - centroid_time_spent)^2 +
@@ -1122,7 +1078,7 @@ merged_df4 <- merged_df4 %>%
       (locationTuer - centroid_locationTuer)^2
   )
 
-# Step 4: Calculate the total within-cluster sum of squares (WSS)
+# Calculate the total within-cluster sum of squares (WSS)
 total_wss4 <- sum(merged_df4$distance_to_centroid)
 
 # Calculate the number of clusters
@@ -1133,17 +1089,17 @@ average_wss4 <- total_wss4 / num_clusters
 
 # Print the average WSS
 average_wss4
+#[1] 4019900015
 
 ######## Clustering Using Location and Trajectory########
 
 # Select predictors for clustering
 data_for_clustering <- combined_df %>%
-  select(id, locDisplay, locFahrplan, locMuelleimer,locplatform, locSäule_1, locSäule_2,locSäule_3, locSäule_4, locSnack_Automat, locTreppe_Baustelle1,locTreppe_Baustelle2, locTuer, trajDisplay, trajFahrplan, trajMuelleimer, `trajon platform moving towards Display`, `trajon platform moving towards Fahrplan`, `trajon platform moving towards Muelleimer`, `trajon platform moving towards Säule_1`, `trajon platform moving towards Säule_2`, `trajon platform moving towards Säule_3`, `trajon platform moving towards Säule_4`, `trajon platform moving towards Snack_Automat`, `trajon platform moving towards Treppe_Baustelle1`, `trajon platform moving towards Treppe_Baustelle2`, `trajon platform moving towards Tuer`)
+  select(locDisplay, locFahrplan, locMuelleimer,locplatform, locSäule_1, locSäule_2,locSäule_3, locSäule_4, locSnack_Automat, locTreppe_Baustelle1,locTreppe_Baustelle2, locTuer, trajDisplay, trajFahrplan, trajMuelleimer, `trajon platform moving towards Display`, `trajon platform moving towards Fahrplan`, `trajon platform moving towards Muelleimer`, `trajon platform moving towards Säule_1`, `trajon platform moving towards Säule_2`, `trajon platform moving towards Säule_3`, `trajon platform moving towards Säule_4`, `trajon platform moving towards Snack_Automat`, `trajon platform moving towards Treppe_Baustelle1`, `trajon platform moving towards Treppe_Baustelle2`, `trajon platform moving towards Tuer`)
 
 
-# Standardize the data (excluding 'id' column)
+# Standardize the data
 data_scaled <- data_for_clustering %>%
-  select(-id) %>%
   scale()
 
 # Determine the optimal number of clusters using the Elbow Method
@@ -1201,7 +1157,7 @@ ggplot(cluster_summary5, aes(x = Cluster5, y = count)) +
   labs(title = "Distribution of Pedestrians in Clusters")
 
 #Re-calculate WCSS
-# Step 1: Calculate centroids for each cluster and store in a new dataframe
+# Calculate centroids for each cluster and store in a new dataframe
 merged_df5 <- combined_df
 merged_df5 <- merged_df5 %>%
   left_join(aggregated_df %>% select(id, time_interval, Cluster5), by = c("id", "time_interval"))
@@ -1246,11 +1202,11 @@ wss_df5 <- merged_df5 %>%
     centroid_trajTuer = mean(trajTuer)
   )
 
-# Step 2: Merge centroids back with the original data
+# Merge centroids back with the original data
 merged_df5 <- merged_df5 %>%
   left_join(wss_df5, by = "Cluster5")
 
-# Step 3: Calculate the squared Euclidean distance to the centroid
+# Calculate the squared Euclidean distance to the centroid
 merged_df5 <- merged_df5 %>%
   mutate(
     distance_to_centroid = (locDisplay - centroid_locationDisplay)^2 + 
@@ -1288,7 +1244,7 @@ merged_df5 <- merged_df5 %>%
       (trajTuer - centroid_trajTuer)^2
   )
 
-# Step 4: Calculate the total within-cluster sum of squares (WSS)
+# Calculate the total within-cluster sum of squares (WSS)
 total_wss5 <- sum(merged_df5$distance_to_centroid)
 
 # Calculate the number of clusters
@@ -1299,6 +1255,7 @@ average_wss5 <- total_wss5 / num_clusters
 
 # Print the average WSS
 average_wss5
+#[1] 44241.68
 
 ########Clustering for Location Visit - Frequencies ########
 
@@ -1313,10 +1270,10 @@ unique_visits1 <- aggregated_df %>%
 visits_df <- unique_visits1 %>%
   pivot_wider(names_from = location, values_from = unique_visits, values_fill = 0)
 
-# Step 1: Prepare the data
+# Prepare the data
 # Remove the 'id' column before clustering
 clustering_data <- visits_df %>%
-  select(c(-id,-platform))
+  select(c(-id))
 
 # Function to calculate mode
 calculate_mode <- function(x) {
@@ -1324,32 +1281,19 @@ calculate_mode <- function(x) {
   unique_x[which.max(tabulate(match(x, unique_x)))]
 }
 
-# Calculate summary statistics
-summary_stats <- clustering_data %>%
-  summarise(across(everything(), list(
-    mean = ~mean(.x, na.rm = TRUE),
-    sd = ~sd(.x, na.rm = TRUE),
-    median = ~median(.x, na.rm = TRUE),
-    min = ~min(.x, na.rm = TRUE),
-    max = ~max(.x, na.rm = TRUE),
-    range = ~max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE),
-    mode = ~calculate_mode(.x)
-  )))
-
-
 # For example, if 'visits_df' contains an ID column, exclude it
 visits_numeric_df <- clustering_data %>% select_if(is.numeric)
 
-# Step 2: Calculate the correlation matrix
+# Calculate the correlation matrix
 correlation_matrix <- cor(clustering_data, use = "complete.obs", method = "pearson")
 
-# Step 3: Print the correlation matrix
+# Print the correlation matrix
 print(correlation_matrix)
 
 # Plot the correlation matrix
 corrplot(correlation_matrix, method = "circle")
 
-# Step 2: Determine the number of clusters (K)
+# Determine the number of clusters (K)
 # Use the Elbow method 
 set.seed(2)  # For reproducibility
 wss <- (nrow(clustering_data)-1)*sum(apply(clustering_data,2,var))
@@ -1357,19 +1301,25 @@ for (i in 2:30) wss[i] <- sum(kmeans(clustering_data, centers=i)$tot.withinss)
 plot(1: 30, wss, type="b", xlab="Number of Clusters (K)", ylab="Within groups sum of squares", main = "Elbow Method for Optimal Clusters:\nLocation Visit Frequencies")
 
 set.seed(2)
-# Step 3: Perform K-means clustering
+# Perform K-means clustering
 kmeans_result <- kmeans(clustering_data, centers=30)
 
 # Access the Within-Cluster Sum of Squares (WSS)
 wss <- kmeans_result$tot.withinss
 print(wss)
+#[1] 46497.91
 
 # Access within-cluster sum of squares for each cluster
 cluster_wss <- kmeans_result$withinss
 print("Within-cluster WSS for each cluster:")
 print(cluster_wss)
+#[1] "Within-cluster WSS for each cluster:"
+#[1]   581.4667  2614.6031   524.5714   367.7279   654.5714  1787.2133   753.5556  1552.4375 17141.5083
+#[10]   308.2273  4746.3096   286.4876   608.6452   838.7460  1162.4505   784.1000   195.1667  1640.9277
+#[19]  1034.8499   432.0437   899.0283  1216.5848  1424.4034   328.7500   364.1818   665.2500   891.9357
+#[28]   677.2133   600.8309  1414.1255
 
-# Step 4: Analyze and visualize the results
+# Analyze and visualize the results
 # Add the cluster assignments back to the original data
 visits_df$cluster <- kmeans_result$cluster
 
@@ -1463,7 +1413,7 @@ ggplot(median_data_long, aes(x = location, y = median, fill = as.factor(cluster)
 location_columns <- names(visits_df)[!names(visits_df) %in% c("id", "cluster")]
 
 # Calculate summary statistics for each location
-summary_stats <- visits_df %>%
+summary_stats_clusters <- visits_df %>%
   group_by(cluster) %>%
   summarize(across(all_of(location_columns), list(
     mean = ~mean(.x, na.rm = TRUE),
@@ -1471,9 +1421,21 @@ summary_stats <- visits_df %>%
     median = ~median(.x, na.rm = TRUE)
   )))
 
+# Calculate summary statistics
+summary_stats <- clustering_data %>%
+  summarise(across(everything(), list(
+    mean = ~mean(.x, na.rm = TRUE),
+    sd = ~sd(.x, na.rm = TRUE),
+    median = ~median(.x, na.rm = TRUE),
+    min = ~min(.x, na.rm = TRUE),
+    max = ~max(.x, na.rm = TRUE),
+    range = ~max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE),
+    mode = ~calculate_mode(.x)
+  )))
+
 
 ######## Clustering Location Visits Binary #########
-# Step 1: Transform the data
+# Transform the data
 # Convert location visit counts to binary (1 if visited, 0 if not)
 binary_visits_df <- visits_df %>%
   mutate(across(-id, ~ ifelse(. > 0, 1, 0)))  # Convert all columns except 'id' to binary
@@ -1517,11 +1479,14 @@ kmeans_result <- kmeans(clustering_data[,-1], centers=17)
 # Access the Within-Cluster Sum of Squares (WSS)
 wss <- kmeans_result$tot.withinss
 print(wss)
+#[1] 15715.38
 
 # Access within-cluster sum of squares for each cluster
 cluster_wss <- kmeans_result$withinss
 print("Within-cluster WSS for each cluster:")
 print(cluster_wss)
+#[1]    79.98802   413.50167   150.72107  1504.69431   381.56554   102.28346   176.86815    71.12621   929.55128
+#[10]    17.51923    77.38679    61.62903 11275.21917    82.39035   200.06568   138.29808    52.57534
 
 # Add the cluster assignments back to the original data
 binary_visits_df$cluster <- kmeans_result$cluster
@@ -1590,18 +1555,19 @@ ggplot(mode_visits_long, aes(x = location, y = factor(cluster), fill = factor(mo
 
 
 # Convert to long format 
-
 binary_visits_long <- binary_visits_df %>%
   select(-id) %>%
   pivot_longer(cols = -cluster, names_to = "location", values_to = "visit")
 
+
 # Fit logistic regression models for each location
+set.seed(1)
 logistic_models <- binary_visits_long %>%
   group_by(location) %>%
   do(model = glm(visit ~ factor(cluster), data = ., family = binomial))
 
 # Check the summary of one model (for example, the first one)
-summary(logistic_models$model[[1]])
+summary(logistic_models$model[[2]])
 
 
 #export the model into a file to include in seminar paper
@@ -1667,7 +1633,7 @@ high_log_odds_data <- binary_visits_df %>%
 summary(high_log_odds_data)
 
 
-######### Trajectory Plotting By Cluster#########
+######### Visualizations: Trajectory Plotting By Cluster#########
 install.packages("viridis")
 
 #### The best performing clustering combination of predictors was that for Iteration 5 using Location 
@@ -1817,7 +1783,7 @@ merged_dense_df <- aggregated_df %>%
 # Unique clusters
 Clusters <- unique(merged_dense_df$cluster)
 
-#rename cluster column for applying for loop
+#rename cluster column for applying for-loop
 # Rename a column
 merged_dense_df <- merged_dense_df %>%
   rename(Cluster = cluster)
@@ -1854,7 +1820,7 @@ clusters <- unique(aggregated_df$Cluster)
 
 for (cluster in clusters) {
   # Filter data for the current cluster
-  cluster_data <- aggregation_interval %>%
+  cluster_data <- merged_dense_df %>%
     filter(Cluster == cluster)
   
   if (nrow(cluster_data) > 0) {
@@ -1946,7 +1912,7 @@ print(ids_multiple_locations)
 # 1. Common Waiting Positions:
 # For each cluster, identify the most common waiting positions based on x and y coordinates
 common_waiting_positions <- aggregated_df %>%
-  group_by(Cluster, location) %>%
+  group_by(cluster, location) %>%
   summarize(mean_x = mean(x.avg, na.rm = TRUE), mean_y = mean(y.avg, na.rm = TRUE), 
             median_x = median(x.avg, na.rm = TRUE), median_y = median(y.avg, na.rm = TRUE), 
             .groups = 'drop')
@@ -1957,7 +1923,7 @@ plot_common_waiting_positions <- function(data) {
     geom_polygon(data = hulls, aes(x = V1, y = V2, group = category, fill = category), alpha = 0.2, color = "black") +
     geom_point(aes(color = "Mean Position"), size = 1) +  # Mean positions
     geom_point(aes(x = median_x, y = median_y, color = "Median Position"), size = 1, shape = 17) +  # Median positions
-    facet_wrap(~Cluster) +  # One plot per cluster
+    facet_wrap(~cluster) +  # One plot per cluster
     labs(title = "Common Waiting Positions by Cluster",
          x = "X Coordinate",
          y = "Y Coordinate",
@@ -1980,12 +1946,12 @@ print(common_waiting_positions_plot)
 # 2. Movement Patterns:
 # Describe typical movement patterns including frequent transitions between locations
 # Calculate transition frequencies excluding self-transitions
-transitions <- merged_df5 %>%
+transitions <- aggregated_df %>%
   arrange(id, time_interval) %>%
   group_by(id) %>%
   mutate(next_location = lead(location)) %>%
   filter(!is.na(next_location) & next_location != location) %>%
-  group_by(Cluster5, location, next_location) %>%
+  group_by(cluster, location, next_location) %>%
   summarize(transition_count = n(), .groups = 'drop')
 
 install.packages("ggraph")
@@ -2011,12 +1977,12 @@ create_network_plot <- function(cluster_data, cluster_id) {
 }
 
 # Apply the function and save plots
-clusters <- unique(transitions$Cluster5)
+clusters <- unique(transitions$cluster)
 
-for (cluster in clusters) {
-  cluster_data <- transitions %>% filter(Cluster5 == cluster)
+for (Cluster in clusters) {
+  cluster_data <- transitions %>% filter(cluster == Cluster)
   if (nrow(cluster_data) > 0) {
-    network_plot <- create_network_plot(cluster_data, cluster)
+    network_plot <- create_network_plot(cluster_data, Cluster)
     print(network_plot)
     ggsave(paste("network_plot_cluster_", cluster, ".png", sep = ""), plot = network_plot, bg = "white")
   }
@@ -2037,10 +2003,10 @@ create_heatmap_plot <- function(cluster_data, cluster_id) {
 }
 
 # Apply the function and save plots
-for (cluster in clusters) {
-  cluster_data <- transitions %>% filter(Cluster5 == cluster)
+for (Cluster in clusters) {
+  cluster_data <- transitions %>% filter(cluster == Cluster)
   if (nrow(cluster_data) > 0) {
-    heatmap_plot <- create_heatmap_plot(cluster_data, cluster)
+    heatmap_plot <- create_heatmap_plot(cluster_data, Cluster)
     print(heatmap_plot)
     ggsave(paste("heatmap_plot_cluster_", cluster, ".png", sep = ""), plot = heatmap_plot, bg = "white")
   }
@@ -2048,11 +2014,11 @@ for (cluster in clusters) {
 
 # Calculate average speed, distance, and time spent in each cluster
 # Part 1: Calculate correct time spent based on first frame in each location
-time_spent_summary <- merged_df5 %>%
-  group_by(Cluster5, id, location) %>%
+time_spent_summary <- aggregated_df %>%
+  group_by(cluster, id, location) %>%
   filter(time_interval == min(time_interval)) %>%  # Keep only the first frame for each location per pedestrian
   ungroup() %>%
-  group_by(Cluster5, location) %>%
+  group_by(cluster, location) %>%
   summarize(
     avg_time_spent = mean(time_spent, na.rm = TRUE),
     total_time_spent = sum(time_spent, na.rm = TRUE),
@@ -2060,8 +2026,8 @@ time_spent_summary <- merged_df5 %>%
   )
 
 # Part 2: Calculate average speed and total distance using all data
-speed_distance_summary <- merged_df5 %>%
-  group_by(Cluster5) %>%
+speed_distance_summary <- aggregated_df %>%
+  group_by(cluster) %>%
   summarize(
     avg_speed = mean(speed, na.rm = TRUE),
     total_distance = sum(distance, na.rm = TRUE),
@@ -2071,8 +2037,8 @@ speed_distance_summary <- merged_df5 %>%
 
 
 # If cumulative_time_spent is not already in your dataframe, calculate it
-if (!"cumulative_time_spent" %in% colnames(merged_df5)) {
-  merged_df5 <- merged_df5 %>%
+if (!"cumulative_time_spent" %in% colnames(aggregated_df)) {
+  aggregated_df <- aggregated_df %>%
     group_by(id, location) %>%
     mutate(cumulative_time_spent = cumsum(time_interval)) %>%
     ungroup()
@@ -2149,12 +2115,11 @@ for(loc in locations) {
 
 
 #heat map for frequency each cluster's observations observe each trajectory
-
 trajectories_long <- trajectories_summary %>%
-  gather(key = "trajectory", value = "count", -Cluster5)
+  gather(key = "trajectory", value = "count", -cluster)
 
 # Step 3: Create a heatmap
-ggplot(trajectories_long, aes(x = Cluster5, y = trajectory, fill = count)) +
+ggplot(trajectories_long, aes(x = cluster, y = trajectory, fill = count)) +
   geom_tile(color = "white") +
   scale_fill_gradient(low = "white", high = "steelblue") +
   labs(
@@ -2168,9 +2133,9 @@ ggplot(trajectories_long, aes(x = Cluster5, y = trajectory, fill = count)) +
 
 #re-create heat map without platform trajectory to get more comparable results
 # Step 1: Summarize the trajectories by cluster, excluding a specific trajectory
-trajectories_summary_filter <- merged_df5 %>%
+trajectories_summary_filter <- aggregated_df %>%
   filter(trajectory != "platform") %>%  # Exclude the specific trajectory
-  group_by(Cluster5, trajectory) %>%
+  group_by(cluster, trajectory) %>%
   summarize(
     count = n(),
     .groups = 'drop'
@@ -2179,10 +2144,10 @@ trajectories_summary_filter <- merged_df5 %>%
 
 # Step 2: Convert the summarized data to long format for plotting
 trajectories_long <- trajectories_summary_filter %>%
-  gather(key = "trajectory", value = "count", -Cluster5)
+  gather(key = "trajectory", value = "count", -cluster)
 
 # Step 3: Create a heatmap
-ggplot(trajectories_long, aes(x = Cluster5, y = trajectory, fill = count)) +
+ggplot(trajectories_long, aes(x = cluster, y = trajectory, fill = count)) +
   geom_tile(color = "white") +
   scale_fill_gradient(low = "white", high = "steelblue") +
   labs(
@@ -2196,15 +2161,15 @@ ggplot(trajectories_long, aes(x = Cluster5, y = trajectory, fill = count)) +
 
 
 # Step 1: Summarize the trajectories by cluster, excluding a specific trajectory if needed
-trajectories_summary <- merged_df5 %>%
-  group_by(Cluster5, trajectory) %>%
+trajectories_summary <- aggregated_df %>%
+  group_by(cluster, trajectory) %>%
   summarize(
     count = n(),
     .groups = 'drop'
   )
 
 # Step 2: Create a bar graph for each trajectory
-ggplot(trajectories_summary, aes(x = Cluster5, y = count, fill = Cluster5)) +
+ggplot(trajectories_summary, aes(x = cluster, y = count, fill = cluster)) +
   geom_bar(stat = "identity", position = "dodge") +
   facet_wrap(~ trajectory, scales = "free_y") + #free_y or fixed for the axis comparability
   labs(
@@ -2218,9 +2183,9 @@ ggplot(trajectories_summary, aes(x = Cluster5, y = count, fill = Cluster5)) +
 
 #Non-consecutive trajectory occurences for each cluster
 # Step 1: Identify non-consecutive changes in trajectory for each pedestrian within each cluster
-non_consecutive_trajectories <- merged_df5 %>%
+non_consecutive_trajectories <- aggregated_df %>%
   arrange(id, time_interval) %>%
-  group_by(id, Cluster5) %>%
+  group_by(id, cluster) %>%
   mutate(
     prev_trajectory = lag(trajectory, default = first(trajectory)), # Previous trajectory
     trajectory_change = trajectory != prev_trajectory  # Identify trajectory change
@@ -2230,14 +2195,13 @@ non_consecutive_trajectories <- merged_df5 %>%
 
 # Step 2: Count the number of first occurrences of each trajectory per pedestrian per cluster
 trajectory_counts <- non_consecutive_trajectories %>%
-  group_by(Cluster5, trajectory, id) %>%
+  group_by(cluster, trajectory, id) %>%
   summarize(count = 1, .groups = 'drop') %>% # Count each first occurrence as 1
-  group_by(Cluster5, trajectory) %>%
+  group_by(cluster, trajectory) %>%
   summarize(total_count = sum(count), .groups = 'drop') # Sum up counts by cluster and trajectory
 
 # Step 3: Visualize the result using ggplot2
-
-ggplot(trajectory_counts, aes(x = trajectory, y = total_count, fill = as.factor(Cluster5))) +
+ggplot(trajectory_counts, aes(x = trajectory, y = total_count, fill = as.factor(cluster))) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
     title = "Non-Consecutive Trajectory Counts by Cluster",
@@ -2248,7 +2212,7 @@ ggplot(trajectory_counts, aes(x = trajectory, y = total_count, fill = as.factor(
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-ggplot(trajectory_counts, aes(x = Cluster5, y = total_count, fill = Cluster5)) +
+ggplot(trajectory_counts, aes(x = cluster, y = total_count, fill = cluster)) +
   geom_bar(stat = "identity", position = "dodge") +
   facet_wrap(~ trajectory, scales = "free_y") + #free_y or fixed for the axis comparability
   labs(
@@ -2265,13 +2229,13 @@ ggplot(trajectory_counts, aes(x = Cluster5, y = total_count, fill = Cluster5)) +
 # Load the package
 # Identify the main transitions for each cluster
 main_transitions <- transitions %>%
-  group_by(Cluster5) %>%
+  group_by(cluster) %>%
   top_n(n = 5, wt = transition_count) %>% # Adjust n to focus on top transitions
   ungroup()
 
 # Create a flow diagram using ggalluvial
-ggplot(main_transitions, aes(axis1 = location, axis2 = next_location, y = transition_count, fill = Cluster5)) +
-  geom_alluvium(aes(fill = Cluster5)) +
+ggplot(main_transitions, aes(axis1 = location, axis2 = next_location, y = transition_count, fill = cluster)) +
+  geom_alluvium(aes(fill = cluster)) +
   geom_stratum() +
   geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 1.5) +
   scale_x_discrete(limits = c("From", "To")) +
@@ -2308,11 +2272,11 @@ create_alluvial_plot <- function(cluster_data, cluster_id) {
 }
 
 # Create alluvial plots for each cluster
-clusters <- unique(transitions$Cluster5)
+Clusters <- unique(transitions$cluster)
 
-for (cluster_id in clusters) {
+for (cluster in Clusters) {
   cluster_data <- transitions %>%
-    filter(Cluster5 == cluster_id)
+    filter(cluster == Clusters)
   plot <- create_alluvial_plot(cluster_data, cluster_id)
   ggsave(filename = paste0("alluvial_plot_cluster_", cluster_id, ".png"), plot = plot, width = 10, height = 7)
 }
@@ -2322,7 +2286,7 @@ for (cluster_id in clusters) {
 ########### Data Metrics for Overall Pedestrian Summary - Not cluster Based##############
 
 # Check if the necessary columns are present
-if (!all(c("id", "location", "time_spent", "time_interval") %in% colnames(merged_df5))) {
+if (!all(c("id", "location", "time_spent", "time_interval") %in% colnames(aggregated_df))) {
   stop("Required columns are missing from the data.table")
 }
 
@@ -2340,13 +2304,13 @@ calculate_average_time_spent_location <- function(data) {
 }
 
 # Create a unique identifier for each visit
-merged_df5 <- merged_df5 %>%
+aggregated_df <- aggregated_df %>%
   arrange(id, time_interval) %>%
   group_by(id, location) %>%
   mutate(visit_id = cumsum(time_interval != lag(time_interval, default = first(time_interval))))
 
 # Apply the function
-average_time_spent_location <- calculate_average_time_spent_location(merged_df5)
+average_time_spent_location <- calculate_average_time_spent_location(aggregated_df)
 
 #Visualize the results horizontal with color
 ggplot(average_time_spent_location, aes(x = reorder(location, average_time_spent_minutes), y = average_time_spent_minutes, fill = location)) +
@@ -2392,9 +2356,9 @@ ggplot(final_avg_result1, aes(x = location, y = average_time_spent)) +
 
 #find some insights for speed of movement around the platform using speed values
 # Replace NA values in speed column with 0
-merged_df5$speed[is.na(merged_df5$speed)] <- 0
+aggregated_df$speed[is.na(aggregated_df$speed)] <- 0
 
-speed_summary <- summary(merged_df5$speed, digits=4)
+speed_summary <- summary(aggregated_df$speed, digits=4)
 
 # Create a data frame with summary statistics
 speed_summary_table <- data.frame(
@@ -2404,21 +2368,21 @@ speed_summary_table <- data.frame(
 
 #How much time do passengers spend standing  in place?
 # Calculate total time where speed is 0
-total_time_speed_zero <- sum(merged_df5$time_diff[merged_df5$speed == 0])
+total_time_speed_zero <- sum(aggregated_df$time_diff[aggregated_df$speed == 0])
 
 #convert to minutes (seconds/minutes)
 total_time_speed_zero/60
 
 #What is the average amount of time a passenger is standing?
 # Calculate total time where speed is 0 for each pedestrian ID
-standing_time_per_pedestrian <- aggregate(time_diff ~ id, data = merged_df5[merged_df5$speed == 0, ], FUN = sum)
+standing_time_per_pedestrian <- aggregate(time_diff ~ id, data = aggregated_df[aggregated_df$speed == 0, ], FUN = sum)
 
 # Calculate average standing time across all pedestrians
 average_standing_time <- sum(standing_time_per_pedestrian$time_diff) / totalpax
 
 # Calculate average number of locations a pedestrian is tracked
 # Calculate the number of unique locations visited by each pedestrian
-location_counts <- merged_df5 %>%
+location_counts <- aggregated_df %>%
   group_by(id) %>%
   summarize(num_locations = n_distinct(location))
 
